@@ -1,47 +1,66 @@
 module FIFO
 #(
-  parameter DEPTH=8,
-  parameter DATA_WIDTH=8
+  parameter DEPTH      = 8,  // Number of entries in the FIFO
+  parameter DATA_WIDTH = 8   // Data bus width
 )
 (
-  input  clk,
-  input  rst_n,
-  input  rden,
-  input  wren,
-  input  [DATA_WIDTH-1:0] i_data,
-  output reg [DATA_WIDTH-1:0] o_data,
-  output full,
-  output empty
+  input  wire                  clk,
+  input  wire                  rst_n,
+  input  wire                  rden,       // Read enable
+  input  wire                  wren,       // Write enable
+  input  wire [DATA_WIDTH-1:0] i_data,     // Data in
+  output reg  [DATA_WIDTH-1:0] o_data,     // Data out
+  output wire                  full,
+  output wire                  empty
 );
 
-logic [DEPTH-1:0] data [DATA_WIDTH-1:0];
+  // For an 8-deep FIFO, we need 3 bits for indexing (log2(8)=3).
+  // More generally, we can write:
+  // localparam PTR_WIDTH = $clog2(DEPTH);
+  // but for more general or older tools, you can do integer math carefully.
+  localparam PTR_WIDTH = $clog2(DEPTH);
 
-logic [3:0]rdptr;
-logic [3:0]wrptr;
+  reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];  // The FIFO storage
 
-assign full = (wrptr - rdptr) >= (DEPTH);
-assign empty = (rdptr == wrptr);
+  // Pointers and count
+  reg [PTR_WIDTH-1:0]  rd_ptr;  // Read pointer
+  reg [PTR_WIDTH-1:0]  wr_ptr;  // Write pointer
+  // Count must go up to DEPTH, so it needs PTR_WIDTH+1 bits
+  reg [PTR_WIDTH:0]    count;
 
-// Set Data
-always_ff @(posedge clk or negedge rst_n) begin
-  if (~rst_n) begin
-    o_data = '0;
-    rdptr = 1'b0;
-    wrptr = 1'b0;
-  end else begin
-    if (rden) begin
-      if (~empty) begin
-        o_data = data[rdptr];
-        rdptr = rdptr + 1'b1;
-      end
+  // Combinational flags
+  assign empty = (count == 0);
+  assign full  = (count == DEPTH);
+
+  // Synchronous logic
+  always @(posedge clk or negedge rst_n) begin
+    if(!rst_n) begin
+      rd_ptr <= {PTR_WIDTH{1'b0}};
+      wr_ptr <= {PTR_WIDTH{1'b0}};
+      count  <= {PTR_WIDTH+1{1'b0}};
+      o_data <= {DATA_WIDTH{1'b0}};
     end
-    else if (wren) begin
-      if (~full) begin
-        data[wrptr] = i_data;
-        wrptr = wrptr + 1'b1;
+    else begin
+      // READ operation
+      if(rden && !empty) begin
+        // Grab data from memory at rd_ptr
+        o_data <= mem[rd_ptr];
+        // Bump read pointer
+        rd_ptr <= rd_ptr + 1'b1;
+        // Decrease count
+        count <= count - 1'b1;
+      end
+
+      // WRITE operation
+      if(wren && !full) begin
+        // Store data into memory at wr_ptr
+        mem[wr_ptr] <= i_data;
+        // Bump write pointer
+        wr_ptr <= wr_ptr + 1'b1;
+        // Increase count
+        count <= count + 1'b1;
       end
     end
   end
-end
 
 endmodule
